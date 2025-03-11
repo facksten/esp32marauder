@@ -1,28 +1,20 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox, scrolledtext, ttk
-import serial.tools.list_ports
+from tkinter import filedialog, messagebox, ttk
 import os
 import platform
 import subprocess
 import itertools
-import sys
-import requests
-import zipfile
-import threading
-import time
 import re
+import threading
 
 class MarauderTool:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("Silent Guardian")
-        self.root.geometry("900x1200")
+        self.root.geometry("1000x1200")
         self.root.configure(bg="#1e1e1e")
         self.root.resizable(True, True)
         self.root.minsize(900, 1000)
-        
-        self.serial_port = None
-        self.is_monitoring = False
         
         self.aircrack_path = self.get_aircrack_path()
         self.create_gui()
@@ -43,7 +35,6 @@ class MarauderTool:
         system = platform.system()
         try:
             if system == "Windows":
-                # Download Windows binary
                 url = "https://download.aircrack-ng.org/aircrack-ng-1.7-win.zip"
                 self.download_and_extract(url)
             elif system == "Linux":
@@ -81,9 +72,6 @@ class MarauderTool:
                             font=("Helvetica", 18, "bold"), bg="#1e1e1e", fg="#00FF7F")
         logo_label.pack()
 
-        # Serial Monitor
-        self.create_serial_monitor()
-
         # File Selection
         self.create_file_selection()
 
@@ -92,71 +80,6 @@ class MarauderTool:
 
         # Aircrack Controls
         self.create_aircrack_controls()
-        
-        
-        
-        
-        
-    def create_serial_monitor(self):
-        """Create the serial monitor section"""
-        serial_frame = tk.LabelFrame(self.root, text="Serial Monitor", bg="#1e1e1e", fg="#00FF7F")
-        serial_frame.pack(padx=10, pady=10, fill="x")
-
-        # Port selection
-        port_frame = tk.Frame(serial_frame, bg="#1e1e1e")
-        port_frame.pack(fill="x", padx=5, pady=5)
-        
-        self.port_var = tk.StringVar(value="Select COM Port")
-        self.port_menu = tk.OptionMenu(port_frame, self.port_var, "")
-        self.port_menu.config(width=30)
-        self.port_menu.pack(side="left", padx=5)
-        
-        refresh_btn = tk.Button(port_frame, text="Refresh", command=self.refresh_ports)
-        refresh_btn.pack(side="left", padx=5)
-        
-        connect_btn = tk.Button(port_frame, text="Connect", command=self.toggle_serial_connection)
-        connect_btn.pack(side="left", padx=5)
-
-        # Monitor
-        self.serial_monitor = scrolledtext.ScrolledText(serial_frame, height=10, bg="#2e2e2e", fg="#FFFFFF")
-        self.serial_monitor.pack(padx=5, pady=5, fill="both", expand=True)
-        
-        self.refresh_ports()
-
-    def refresh_ports(self):
-        """Refresh the available serial ports"""
-        ports = [port.device for port in serial.tools.list_ports.comports()]
-        menu = self.port_menu["menu"]
-        menu.delete(0, "end")
-        for port in ports:
-            menu.add_command(label=port, command=lambda p=port: self.port_var.set(p))
-
-    def toggle_serial_connection(self):
-        """Toggle the serial connection state"""
-        if not self.serial_port:
-            try:
-                port = self.port_var.get()
-                self.serial_port = serial.Serial(port, 115200, timeout=1)
-                threading.Thread(target=self.monitor_serial, daemon=True).start()
-                messagebox.showinfo("Success", f"Connected to {port}")
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to connect: {str(e)}")
-        else:
-            self.serial_port.close()
-            self.serial_port = None
-            messagebox.showinfo("Disconnected", "Serial connection closed")
-
-    def monitor_serial(self):
-        """Monitor the serial port for data"""
-        while self.serial_port and self.serial_port.is_open:
-            try:
-                if self.serial_port.in_waiting:
-                    data = self.serial_port.readline().decode().strip()
-                    self.serial_monitor.insert("end", data + "\n")
-                    self.serial_monitor.see("end")
-                time.sleep(0.1)
-            except:
-                break
 
     def create_file_selection(self):
         """Create the file selection section"""
@@ -200,7 +123,7 @@ class MarauderTool:
         generator_frame = tk.LabelFrame(self.root, text="Password List Generator", bg="#1e1e1e", fg="#00FF7F")
         generator_frame.pack(padx=10, pady=10, fill="x")
 
-        # ایجاد سه فریم برای سازماندهی بهتر فیلدها
+        # ایجاد فریم‌ها برای سازماندهی بهتر فیلدها
         frame1 = tk.Frame(generator_frame, bg="#1e1e1e")
         frame2 = tk.Frame(generator_frame, bg="#1e1e1e")
         frame3 = tk.Frame(generator_frame, bg="#1e1e1e")
@@ -210,18 +133,22 @@ class MarauderTool:
         for frame in frames:
             frame.pack(fill="x", padx=5, pady=5)
 
+        # فیلدهای ردیف اول
         fields1 = [("SSID", "SSID of the network"), 
                 ("Owner Name", "Name of the owner"),
                 ("Last Name", "Last name")]
 
+        # فیلدهای ردیف دوم
         fields2 = [("Family Member", "Name of family member"),
                 ("Company", "Company name"),
                 ("National ID", "National ID number")]
 
+        # فیلدهای ردیف سوم
         fields3 = [("Country", "Country name"),
                 ("Phone", "Phone number"),
                 ("Gmail", "Gmail address")]
 
+        # فیلدهای ردیف چهارم
         fields4 = [("Birth Year", "Year of birth"),
                 ("Current Year", "Current year"),
                 ("Custom", "Custom text")]
@@ -246,15 +173,70 @@ class MarauderTool:
                 entry.bind('<FocusOut>', lambda e, entry=entry, ph=placeholder: 
                         self.on_entry_focus_out(e, entry, ph))
 
+                # اضافه کردن بررسی کد ملی برای فیلد کد ملی
+                if field == "National ID":
+                    check_button = tk.Button(frame, text="Check", 
+                                           command=lambda e=entry: self.check_national_id(e))
+                    check_button.grid(row=0, column=i*3+2, padx=5, pady=2)
+                    self.national_id_status = tk.Label(frame, text="", bg="#1e1e1e", fg="#FF0000")
+                    self.national_id_status.grid(row=0, column=i*3+3, padx=5, pady=2)
+
+        # اضافه کردن چک باکس‌ها و دکمه‌ها
         self.use_symbols = tk.BooleanVar(value=True)
+        self.use_numbers = tk.BooleanVar(value=True)
+        self.use_uppercase = tk.BooleanVar(value=True)
+        self.use_lowercase = tk.BooleanVar(value=True)
+
         symbols_check = tk.Checkbutton(generator_frame, text="Include Special Symbols (@#$._)", 
                                     variable=self.use_symbols, bg="#1e1e1e", fg="#FFFFFF",
                                     selectcolor="#1e1e1e")
         symbols_check.pack(pady=5)
 
+        numbers_check = tk.Checkbutton(generator_frame, text="Include Numbers (123)", 
+                                    variable=self.use_numbers, bg="#1e1e1e", fg="#FFFFFF",
+                                    selectcolor="#1e1e1e")
+        numbers_check.pack(pady=5)
+
+        uppercase_check = tk.Checkbutton(generator_frame, text="Include Uppercase Letters", 
+                                    variable=self.use_uppercase, bg="#1e1e1e", fg="#FFFFFF",
+                                    selectcolor="#1e1e1e")
+        uppercase_check.pack(pady=5)
+
+        lowercase_check = tk.Checkbutton(generator_frame, text="Include Lowercase Letters", 
+                                    variable=self.use_lowercase, bg="#1e1e1e", fg="#FFFFFF",
+                                    selectcolor="#1e1e1e")
+        lowercase_check.pack(pady=5)
+
         generate_btn = tk.Button(generator_frame, text="Generate Password List", 
                             command=self.generate_password_list)
         generate_btn.pack(pady=5)
+
+    def check_national_id(self, entry):
+        """Check if the national ID is valid and update the status label"""
+        national_id = entry.get()
+        if self.check_code_meli(national_id):
+            self.national_id_status.config(text="✅", fg="#00FF00")
+        else:
+            self.national_id_status.config(text="❌", fg="#FF0000")
+
+    def check_code_meli(self, code):
+        """
+        بررسی صحت کد ملی ایران
+        :param code: کد ملی به صورت رشته
+        :return: True اگر کد ملی معتبر باشد، در غیر این صورت False
+        """
+        if len(code) < 8 or int(code) == 0:
+            return False
+        
+        code = ('0000' + code)[-10:]  # اضافه کردن صفر به ابتدا تا طول کد 10 رقم شود
+        if int(code[3:6]) == 0:
+            return False
+        
+        c = int(code[9])
+        s = sum(int(code[i]) * (10 - i) for i in range(9))
+        s %= 11
+        
+        return (s < 2 and c == s) or (s >= 2 and c == (11 - s))
 
     def on_entry_focus_in(self, event, entry, placeholder):
         """Handle entry field focus in"""
@@ -269,35 +251,43 @@ class MarauderTool:
             entry.config(fg='gray')
 
     def generate_password_list(self):
+        # جمع‌آوری مقادیر غیر خالی
         values = []
         for field, entry in self.generator_entries.items():
             value = entry.get()
             if value and value not in ["SSID of the network", "Name of the owner", "Last name", 
-                                    "Name of family member (parent/sibling)", "Company name", 
+                                    "Name of family member", "Company name", 
                                     "National ID number", "Country name", "Phone number", 
                                     "Gmail address", "Year of birth", "Current year", 
                                     "Custom text to include"]:
                 values.append(value)
-                values.append(value.lower())
-                values.append(value.upper())
-                values.append(value.capitalize())
+                if self.use_uppercase.get():
+                    values.append(value.upper())
+                if self.use_lowercase.get():
+                    values.append(value.lower())
+                if self.use_numbers.get():
+                    values.append(value + "123")
+                    values.append(value + "1234")
 
         if not values:
             messagebox.showwarning("Warning", "Please enter at least one value")
             return
 
-        symbols = ['@', '#', '$', '.', '_', '!', '123', '1234', '12345'] if self.use_symbols.get() else []
+        symbols = ['@', '#', '$', '.', '_', '!'] if self.use_symbols.get() else []
         generated_passwords = set()
 
+        # ترکیب مقادیر با طول‌های مختلف
         for length in range(1, 5):
             for combo in itertools.combinations(values, length):
                 password = ''.join(combo)
                 if 8 <= len(password) <= 16:
                     generated_passwords.add(password)
+                    # اضافه کردن ترکیب با سمبل‌ها
                     for symbol in symbols:
                         generated_passwords.add(password + symbol)
                         generated_passwords.add(symbol + password)
 
+        # ترکیب permutation برای تنوع بیشتر
         for length in range(2, 4):
             for combo in itertools.permutations(values, length):
                 password = ''.join(combo)
@@ -403,6 +393,7 @@ class MarauderTool:
                 with open("aircrack_logs.txt", "w") as log_file:
                     log_file.write(output)
 
+            # Extract and display password if found
             password = self.extract_password(output)
             if password:
                 self.root.after(0, lambda: self.show_success(password))
@@ -439,4 +430,3 @@ class MarauderTool:
 if __name__ == "__main__":
     app = MarauderTool()
     app.run()
-
