@@ -6,8 +6,11 @@ import threading
 import time
 import os
 import re
+import folium
+from folium.plugins import MarkerCluster
+import webbrowser
 
-VERSION = "1.5.4"
+VERSION = "1.5.5"
 
 class MarauderCommander:
     def __init__(self):
@@ -37,6 +40,7 @@ class MarauderCommander:
         self.serial_port = None
         self.is_connected = False
         self.ap_list = []
+        self.scanning = False  # متغیر جدید برای پیگیری وضعیت اسکن
 
         self.create_gui()
 
@@ -53,6 +57,16 @@ class MarauderCommander:
         self.create_network_list_frame()
         self.create_command_frames()
         self.create_sniffing_command_frame()
+
+        # اضافه کردن دکمه نمایش نقشه وای‌فای
+        map_button = tk.Button(self.scrollable_frame, text="Show WiFi Map", command=self.show_wifi_map,
+                               bg="#2e2e2e", fg="#FFFFFF")
+        map_button.pack(pady=10)
+
+        # اضافه کردن دکمه Wardrive
+        wardrive_button = tk.Button(self.scrollable_frame, text="Wardrive", command=self.start_wardrive,
+                                    bg="#2e2e2e", fg="#FFFFFF")
+        wardrive_button.pack(pady=10)
 
     def create_serial_frame(self):
         serial_frame = tk.LabelFrame(self.scrollable_frame, text="Serial Monitor", bg="#1e1e1e", fg="#00FF7F")
@@ -75,7 +89,7 @@ class MarauderCommander:
         self.connect_btn.pack(side="left", padx=5)
 
         self.refresh_ports()
-    
+
     def create_output_frame(self):
         output_frame = tk.LabelFrame(self.root, text="Command Output", bg="#1e1e1e", fg="#00FF7F")
         output_frame.pack(fill="both", expand=True, padx=10, pady=5)
@@ -83,7 +97,7 @@ class MarauderCommander:
         self.output_text = scrolledtext.ScrolledText(output_frame, height=10,
                                                    bg="#2e2e2e", fg="#FFFFFF")
         self.output_text.pack(fill="both", expand=True, padx=5, pady=5)
-    
+
     def create_network_list_frame(self):
         self.networks_frame = tk.LabelFrame(self.root, text="WiFi Networks", bg="#1e1e1e", fg="#00FF7F")
         self.networks_frame.pack(fill="both", expand=True, padx=10, pady=5)
@@ -135,7 +149,7 @@ class MarauderCommander:
                           command=lambda c=cmd: self.attack_selected(c),
                           bg="#2e2e2e", fg="#FFFFFF")
             btn.pack(side="left", padx=5)
-    
+
     def create_command_frames(self):
         commands_frame = tk.LabelFrame(self.root, text="Commands", bg="#1e1e1e", fg="#00FF7F")
         commands_frame.pack(fill="both", expand=True, padx=10, pady=5)
@@ -307,6 +321,7 @@ class MarauderCommander:
                 self.is_connected = True
                 self.connect_btn.configure(text="Disconnect")
                 
+                # شروع خواندن داده‌های سریال
                 self.read_serial()
                 
                 self.write_to_output(f"Connected to {port}\n")
@@ -325,10 +340,31 @@ class MarauderCommander:
             return
             
         try:
+            # تغییر وضعیت اسکن براساس دستور
+            if command == "scanap":
+                self.scanning = True
+                # پاک کردن لیست قبلی هنگام شروع اسکن جدید
+                self.ap_list = []
+                for item in self.networks_tree.get_children():
+                    self.networks_tree.delete(item)
+            
+            elif command == "stopscan":
+                if self.scanning:
+                    # وقتی اسکن متوقف می‌شود، پیام نتایج نمایش داده می‌شود
+                    self.root.after(500, self.show_scan_results)  # تاخیر کوتاه برای دریافت آخرین داده‌ها
+                self.scanning = False
+            
             self.serial_port.write(f"{command}\n".encode())
             self.write_to_output(f"Sent: {command}\n")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to send command: {str(e)}")
+
+    def show_scan_results(self):
+        # نمایش نتایج اسکن بعد از توقف
+        if len(self.ap_list) > 0:
+            messagebox.showinfo("Scan Results", f"Found {len(self.ap_list)} networks")
+        else:
+            messagebox.showinfo("Scan Results", "No networks found")
 
     def send_terminal_command(self):
         command = self.terminal_entry.get().strip()
@@ -338,6 +374,19 @@ class MarauderCommander:
             return
         
         try:
+            # بررسی دستورات scanap و stopscan
+            if command == "scanap":
+                self.scanning = True
+                # پاک کردن لیست قبلی هنگام شروع اسکن جدید
+                self.ap_list = []
+                for item in self.networks_tree.get_children():
+                    self.networks_tree.delete(item)
+            elif command == "stopscan":
+                if self.scanning:
+                    # وقتی اسکن متوقف می‌شود، پیام نتایج نمایش داده می‌شود
+                    self.root.after(500, self.show_scan_results)
+                self.scanning = False
+                
             self.serial_port.write(f"{command}\n".encode())
             self.write_to_output(f"Terminal Sent: {command}\n")
             
@@ -359,7 +408,7 @@ class MarauderCommander:
     def process_output(self, data):
         self.write_to_output(f"{data}\n")
         
-        if data.startswith("RSSI:"):
+        if "RSSI:" in data:
             ap_pattern = r"RSSI: ([-\d]+) Ch: (\d+) BSSID: ([0-9a-f:]+) ESSID: (.+)"
             beacon_pattern = r"Beacon: .+ (\d+) \d+"
             
@@ -377,19 +426,58 @@ class MarauderCommander:
                 bssid = ap_match.group(3)
                 essid = ap_match.group(4)
                 
-                index = len(self.ap_list) + 1
-                self.ap_list.append({
-                    'index': index,
-                    'rssi': rssi,
-                    'channel': channel,
-                    'bssid': bssid,
-                    'essid': essid
-                })
-                
-                self.networks_tree.insert("", tk.END, values=(index, rssi, channel, bssid, essid))
+                # بررسی تکراری نبودن MAC آدرس
+                if not any(ap['bssid'] == bssid for ap in self.ap_list):
+                    index = len(self.ap_list) + 1
+                    self.ap_list.append({
+                        'index': index,
+                        'rssi': rssi,
+                        'channel': channel,
+                        'bssid': bssid,
+                        'essid': essid,
+                        'lat': None,  # مختصات GPS
+                        'lon': None   # مختصات GPS
+                    })
+                    
+                    self.networks_tree.insert("", tk.END, values=(index, rssi, channel, bssid, essid))
         
-        elif "stopscan" in data and not self.ap_list:
-            messagebox.showinfo("Scan Result", "No networks found")
+        elif "|" in data:  # پردازش خروجی wardrive
+            # الگوی جدید برای تطبیق با خروجی واقعی
+            wardrive_pattern = r"(\d+) \| ([0-9a-fA-F:]+),([^,]+),\[([^\]]+)\],([^,]+),(\d+),([-\d]+),([\d.]+),([\d.]+),([\d.]+),([\d.]+),(\w+)"
+            wardrive_match = re.search(wardrive_pattern, data)
+            
+            if wardrive_match:
+                index = int(wardrive_match.group(1))
+                bssid = wardrive_match.group(2)
+                essid = wardrive_match.group(3)
+                encryption = wardrive_match.group(4)
+                date_time = wardrive_match.group(5)  # تاریخ و زمان
+                channel = int(wardrive_match.group(6))
+                rssi = int(wardrive_match.group(7))
+                lat = float(wardrive_match.group(8))  # عرض جغرافیایی
+                lon = float(wardrive_match.group(9))  # طول جغرافیایی
+                altitude = float(wardrive_match.group(10))  # ارتفاع
+                accuracy = float(wardrive_match.group(11))  # دقت
+                
+                # بررسی تکراری نبودن MAC آدرس
+                if not any(ap['bssid'] == bssid for ap in self.ap_list):
+                    # اضافه کردن به لیست ap_list با مختصات GPS
+                    self.ap_list.append({
+                        'index': index,
+                        'rssi': rssi,
+                        'channel': channel,
+                        'bssid': bssid,
+                        'essid': essid,
+                        'encryption': encryption,
+                        'lat': lat,
+                        'lon': lon,
+                        'altitude': altitude,
+                        'accuracy': accuracy,
+                        'date_time': date_time
+                    })
+                    
+                    # نمایش در Treeview
+                    self.networks_tree.insert("", tk.END, values=(index, rssi, channel, bssid, essid))
 
     def disconnect_on_error(self, error):
         messagebox.showerror("Serial Error", error)
@@ -429,6 +517,98 @@ class MarauderCommander:
     def attack_selected(self, attack_type):
         command = f"attack -t {attack_type}"
         self.send_command(command)
+
+    def show_wifi_map(self):
+        if not self.ap_list:
+            messagebox.showwarning("No Data", "No WiFi networks found to display on the map.")
+            return
+
+        # بررسی وجود مختصات GPS در حداقل یکی از شبکه‌ها
+        has_coordinates = any(ap.get('lat') is not None and ap.get('lon') is not None for ap in self.ap_list)
+        
+        if not has_coordinates:
+            messagebox.showwarning("No GPS Data", "No GPS coordinates found. Run 'wardrive' to collect location data.")
+            return
+
+        # محاسبه مرکز نقشه (میانگین مختصات موجود)
+        valid_coords = [(ap['lat'], ap['lon']) for ap in self.ap_list if ap.get('lat') is not None and ap.get('lon') is not None]
+        if valid_coords:
+            avg_lat = sum(lat for lat, _ in valid_coords) / len(valid_coords)
+            avg_lon = sum(lon for _, lon in valid_coords) / len(valid_coords)
+            map_center = [avg_lat, avg_lon]
+        else:
+            map_center = [35.6895, 51.3890]  # مختصات پیش‌فرض
+        
+        # ایجاد نقشه با مختصات مرکزی
+        wifi_map = folium.Map(location=map_center, zoom_start=15)
+
+        # ایجاد خوشه‌بندی برای مارکرها
+        marker_cluster = MarkerCluster().add_to(wifi_map)
+
+        # اضافه کردن مارکرها برای هر وای‌فای
+        for ap in self.ap_list:
+            bssid = ap['bssid']
+            essid = ap['essid']
+            rssi = ap.get('rssi', 0)
+            channel = ap.get('channel', '?')
+            
+            # استفاده از مختصات GPS اگر موجود باشد
+            if ap.get('lat') is not None and ap.get('lon') is not None:
+                lat = ap['lat']
+                lon = ap['lon']
+                
+                # اطلاعات اضافی از wardrive
+                encryption = ap.get('encryption', 'Unknown')
+                date_time = ap.get('date_time', 'Unknown')
+                altitude = ap.get('altitude', 'Unknown')
+                accuracy = ap.get('accuracy', 'Unknown')
+
+                # انتخاب رنگ براساس قدرت سیگنال
+                try:
+                    rssi_val = int(rssi)
+                    if rssi_val > -65:
+                        color = 'green'
+                    elif rssi_val > -80:
+                        color = 'orange'
+                    else:
+                        color = 'red'
+                except (ValueError, TypeError):
+                    color = 'blue'  # رنگ پیش‌فرض
+
+                # ایجاد پاپ‌آپ برای نمایش اطلاعات وای‌فای
+                popup_text = f"""
+                <b>ESSID:</b> {essid}<br>
+                <b>BSSID:</b> {bssid}<br>
+                <b>RSSI:</b> {rssi} dBm<br>
+                <b>Channel:</b> {channel}<br>
+                <b>Encryption:</b> {encryption}<br>
+                <b>Date/Time:</b> {date_time}<br>
+                <b>Latitude:</b> {lat}<br>
+                <b>Longitude:</b> {lon}<br>
+                <b>Altitude:</b> {altitude} m<br>
+                <b>GPS Accuracy:</b> {accuracy} m
+                """
+                folium.Marker(
+                    [lat, lon], 
+                    popup=folium.Popup(popup_text, max_width=300),
+                    icon=folium.Icon(color=color, icon='wifi', prefix='fa')
+                ).add_to(marker_cluster)
+
+        # ذخیره نقشه به عنوان یک فایل HTML
+        try:
+            wifi_map.save("wifi_map.html")
+            webbrowser.open("wifi_map.html")
+            messagebox.showinfo("Map Created", "WiFi map has been created and opened in your browser.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to create map: {str(e)}")
+
+    def start_wardrive(self):
+        if not self.is_connected:
+            messagebox.showerror("Error", "Please connect to a device first")
+            return
+        
+        self.send_command("wardrive")
+        self.write_to_output("Starting Wardrive...\n")
 
     def run(self):
         self.root.mainloop()
